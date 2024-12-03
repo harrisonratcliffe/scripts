@@ -68,4 +68,5 @@ curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-clu
 sudo chmod +x /tmp/join-swarm-cluster.sh
 echo ""
 
-echo "Process completed successfully. You can now run su admin && /tmp/join-swarm-cluster to add this node to a Docker Swarm cluster."
+echo "Process completed successfully. You can now run the following to add this node to a Docker Swarm cluster."
+echo "su -c /tmp/join-swarm-cluster admin"
