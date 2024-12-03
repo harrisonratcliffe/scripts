@@ -18,3 +18,5 @@ else
 fi
 
 echo "Node has been added to the Docker Swarm cluster."
+echo ""
+echo "You can delete the join script with: rm /tmp/join-swarm-cluster.sh"
