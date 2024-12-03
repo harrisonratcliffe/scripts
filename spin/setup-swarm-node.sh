@@ -69,7 +69,6 @@ echo ""
 # Generate a random password if the user left it blank
 if [ -z "$admin_password" ]; then
     admin_password=$(openssl rand -base64 16)
-    echo "Generated random password: $admin_password"
 fi
 
 # Set the password for the admin user using chpasswd
