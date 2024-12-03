@@ -3,7 +3,7 @@
 ## Usage
 
 ```bash
-<(curl -s RAW_SCRIPT_URL)
+bash <(curl -s RAW_SCRIPT_URL)
 ```
 
 Example: 
