@@ -48,7 +48,7 @@ if ! getent group docker > /dev/null; then
     echo "Group 'docker' does not exist. Creating group 'docker'..."
     sudo groupadd docker
 else
-    echo "Group 'docker' already exists."
+    echo "Group 'docker' already exists, continuing..."
 fi
 echo ""
 
@@ -68,6 +68,4 @@ curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-clu
 sudo chmod +x /tmp/join-swarm-cluster.sh
 echo ""
 
-echo "Process completed successfully. You can now use the join-swarm-cluster.sh script to add a node to the Docker Swarm cluster."
-echo "You can delete the join script after use with the following command:"
-echo "sudo rm /tmp/join-swarm-cluster.sh"
+echo "Process completed successfully. You can now run sh /tmp/join-swarm-cluster.sh to add this node to a Docker Swarm cluster."
