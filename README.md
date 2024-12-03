@@ -12,4 +12,4 @@ Example:
 
 Or with a shortcut configured on Cloudflare:
 
-`bash <(curl -s -L https://scripts.hcloud.uk/spin/start-over.sh)` & `bash <(curl -s -L https://s.hcloud.uk/spin/start-over.sh)`
+`bash <(curl -s https://scripts.hcloud.uk/spin/start-over.sh)` & `bash <(curl -s https://s.hcloud.uk/spin/start-over.sh)`
