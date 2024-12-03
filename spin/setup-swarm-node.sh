@@ -62,10 +62,12 @@ else
 fi
 echo ""
 
-# Download the join swarm script
-echo "Downloading the join swarm script..."
-curl -o /usr/local/bin/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-cluster.sh
-sudo chmod +x /usr/local/bin/join-swarm-cluster.sh
+# Download the join swarm script to /tmp
+echo "Downloading the join swarm script to /tmp..."
+curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-cluster.sh
+sudo chmod +x /tmp/join-swarm-cluster.sh
 echo ""
 
 echo "Process completed successfully. You can now use the join-swarm-cluster.sh script to add a node to the Docker Swarm cluster."
+echo "You can delete the join script after use with the following command:"
+echo "sudo rm /tmp/join-swarm-cluster.sh"
