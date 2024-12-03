@@ -78,9 +78,10 @@ echo "admin:$admin_password" | sudo chpasswd
 # Configure UFW firewall rules
 echo "Configuring UFW firewall rules..."
 sudo ufw allow 22/tcp
-sudo ufw allow from 10.2.0.0/16 to any port 4780 proto udp
-sudo ufw allow from 10.2.0.0/16 to any port 7946 proto udp
+sudo ufw allow from 10.2.0.0/16 to any port 2377 proto tcp
 sudo ufw allow from 10.2.0.0/16 to any port 7946 proto tcp
+sudo ufw allow from 10.2.0.0/16 to any port 7946 proto udp
+sudo ufw allow from 10.2.0.0/16 to any port 4789 proto udp
 echo ""
 
 # Enable UFW
