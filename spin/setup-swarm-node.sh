@@ -63,16 +63,25 @@ fi
 echo ""
 
 # Prompt for password for the admin user
-read -sp "Enter password for the 'admin' user: " admin_password
+read -sp "Enter password for the 'admin' user (leave blank for a random 16 character password): " admin_password
 echo ""
-echo $admin_password | sudo passwd admin --stdin
+
+# Generate a random password if the user left it blank
+if [ -z "$admin_password" ]; then
+    admin_password=$(openssl rand -base64 16)
+    echo "Generated random password: $admin_password"
+fi
+
+# Set the password for the admin user using chpasswd
+echo "Setting password for the 'admin' user..."
+echo "admin:$admin_password" | sudo chpasswd
 
 # Download the join swarm script to /tmp
 echo "Downloading the join swarm script to /tmp..."
 curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-cluster.sh
 echo ""
 
-echo "Process completed successfully. You can now run the following to add this node to a Docker Swarm cluster."
+echo "Node setup completed successfully. You can now run the following to add this node to a Docker Swarm cluster."
 echo "sudo -u admin sh /tmp/join-swarm-cluster.sh"
 echo ""
 
