@@ -62,6 +62,11 @@ else
 fi
 echo ""
 
+# Prompt for password for the admin user
+read -sp "Enter password for the 'admin' user: " admin_password
+echo ""
+echo $admin_password | sudo passwd admin --stdin
+
 # Download the join swarm script to /tmp
 echo "Downloading the join swarm script to /tmp..."
 curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-cluster.sh
@@ -71,5 +76,5 @@ echo "Process completed successfully. You can now run the following to add this 
 echo "sudo -u admin sh /tmp/join-swarm-cluster.sh"
 echo ""
 
-# Echo the admin user at the end
-echo "The admin user is 'admin'."
+# Echo the admin password at the end (for demonstration, not recommended for real usage)
+echo "The password for the admin user is: '$admin_password'."
