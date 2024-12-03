@@ -9,8 +9,8 @@ sudo apt update
 echo ""
 
 # Install necessary packages
-echo "Installing necessary packages: apt-transport-https, ca-certificates, curl, software-properties-common..."
-sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
+echo "Installing necessary packages: apt-transport-https, ca-certificates, curl, software-properties-common, ufw..."
+sudo apt install -y apt-transport-https ca-certificates curl software-properties-common ufw
 echo ""
 
 # Add Docker's official GPG key
@@ -75,6 +75,20 @@ fi
 echo "Setting password for the 'admin' user..."
 echo "admin:$admin_password" | sudo chpasswd
 
+# Configure UFW firewall rules
+echo "Configuring UFW firewall rules..."
+sudo ufw allow icmp
+sudo ufw allow 22/tcp
+sudo ufw allow from 10.2.0.0/16 to any port 4780 proto udp
+sudo ufw allow from 10.2.0.0/16 to any port 7946 proto udp
+sudo ufw allow from 10.2.0.0/16 to any port 7946 proto tcp
+echo ""
+
+# Enable UFW
+echo "Enabling UFW..."
+sudo ufw enable
+echo ""
+
 # Download the join swarm script to /tmp
 echo "Downloading the join swarm script to /tmp..."
 curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-cluster.sh
@@ -85,4 +99,4 @@ echo "sudo -u admin bash /tmp/join-swarm-cluster.sh"
 echo ""
 
 # Echo the admin password at the end (for demonstration, not recommended for real usage)
-echo "The password for the admin user is: '$admin_password'."
+echo "The password for the admin user is: '$admin_password’."
