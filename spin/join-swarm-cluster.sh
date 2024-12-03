@@ -3,7 +3,13 @@
 # Prompt for necessary variables
 read -p "Enter the Manager IP Address: " MANAGER_IP
 read -p "Should this node be a master (y/n)? " IS_MASTER
-read -p "Enter the Swarm cluster token (you can get the token from the manager with 'docker swarm join-token worker'): " SWARM_TOKEN
+
+# Ask for the Swarm cluster token based on the node type
+if [[ "$IS_MASTER" == "y" || "$IS_MASTER" == "Y" ]]; then
+    read -p "Enter the Swarm cluster token (you can get the token from the manager with 'docker swarm join-token manager'): " SWARM_TOKEN
+else
+    read -p "Enter the Swarm cluster token (you can get the token from the manager with 'docker swarm join-token worker'): " SWARM_TOKEN
+fi
 
 echo "Starting the process to add this node to the Docker Swarm cluster..."
 echo ""
