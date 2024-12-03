@@ -81,7 +81,7 @@ curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-clu
 echo ""
 
 echo "Node setup completed successfully. You can now run the following to add this node to a Docker Swarm cluster."
-echo "sudo -u admin sh /tmp/join-swarm-cluster.sh"
+echo "sudo -u admin bash /tmp/join-swarm-cluster.sh"
 echo ""
 
 # Echo the admin password at the end (for demonstration, not recommended for real usage)
