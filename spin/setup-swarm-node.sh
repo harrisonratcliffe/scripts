@@ -65,8 +65,11 @@ echo ""
 # Download the join swarm script to /tmp
 echo "Downloading the join swarm script to /tmp..."
 curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-cluster.sh
-sudo chmod +x /tmp/join-swarm-cluster.sh
 echo ""
 
 echo "Process completed successfully. You can now run the following to add this node to a Docker Swarm cluster."
-echo "su -c /tmp/join-swarm-cluster admin"
+echo "sudo -u admin sh /tmp/join-swarm-cluster.sh"
+echo ""
+
+# Echo the admin user at the end
+echo "The admin user is 'admin'."
