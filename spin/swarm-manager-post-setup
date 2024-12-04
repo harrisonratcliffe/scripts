@@ -5,7 +5,7 @@ echo ""
 sleep 10
 
 # Prompt for the private IP range
-read -p "Enter the private IP range (e.g., 10.2.0.0/16): " private_ip_range
+read -p "Enter the private IP range (e.g., 10.0.0.0/16): " private_ip_range
 
 # Configure UFW firewall rules
 echo "Configuring UFW firewall rules..."
