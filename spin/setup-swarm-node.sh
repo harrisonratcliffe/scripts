@@ -1,5 +1,9 @@
 #!/bin/bash
 
+echo "When using Spin, this script should not be used on the first manager node. Use spin provision instead. Continuing in 10 seconds..."
+echo ""
+sleep 10
+
 echo "Starting the process to set up the Docker environment..."
 echo ""
 
@@ -76,7 +80,7 @@ echo "Setting password for the 'admin' user..."
 echo "admin:$admin_password" | sudo chpasswd
 
 # Prompt for the private IP range
-read -p "Enter the private IP range (e.g., 10.2.0.0/16): " private_ip_range
+read -p "Enter the private IP range (e.g., 10.0.0.0/16): " private_ip_range
 
 # Configure UFW firewall rules
 echo "Configuring UFW firewall rules..."
