@@ -75,13 +75,16 @@ fi
 echo "Setting password for the 'admin' user..."
 echo "admin:$admin_password" | sudo chpasswd
 
+# Prompt for the private IP range
+read -p "Enter the private IP range (e.g., 10.2.0.0/16): " private_ip_range
+
 # Configure UFW firewall rules
 echo "Configuring UFW firewall rules..."
 sudo ufw allow 22/tcp
-sudo ufw allow from 10.2.0.0/16 to any port 2377 proto tcp
-sudo ufw allow from 10.2.0.0/16 to any port 7946 proto tcp
-sudo ufw allow from 10.2.0.0/16 to any port 7946 proto udp
-sudo ufw allow from 10.2.0.0/16 to any port 4789 proto udp
+sudo ufw allow from $private_ip_range to any port 2377 proto tcp
+sudo ufw allow from $private_ip_range to any port 7946 proto tcp
+sudo ufw allow from $private_ip_range to any port 7946 proto udp
+sudo ufw allow from $private_ip_range to any port 4789 proto udp
 echo ""
 
 # Enable UFW
@@ -99,4 +102,4 @@ echo "sudo -u admin bash /tmp/join-swarm-cluster.sh"
 echo ""
 
 # Echo the admin password at the end (for demonstration, not recommended for real usage)
-echo "The password for the admin user is: '$admin_password’."
+echo "The password for the admin user is: '$admin_password'."
