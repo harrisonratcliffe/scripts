@@ -16,5 +16,10 @@ sudo ufw allow from $private_ip_range to any port 7946 proto udp
 sudo ufw allow from $private_ip_range to any port 4789 proto udp
 echo ""
 
+# Download the join swarm script to /tmp
+echo "Downloading the join swarm script to /tmp..."
+curl -o /tmp/join-swarm-cluster.sh https://scripts.hcloud.uk/spin/join-swarm-cluster.sh
+echo ""
+
 echo "Completed! You can now run the following to add this node to a Docker Swarm cluster (unless it's the first manager node)"
-echo "sudo -u admin bash /tmp/join-swarm-cluster.sh"
+echo "sudo bash /tmp/join-swarm-cluster.sh"
