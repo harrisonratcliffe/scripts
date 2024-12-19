@@ -1,8 +1,8 @@
 #!/bin/bash
 
-echo "This script should only be ran on manager nodes that are being used in a cluster. Continuing in 10 seconds..."
+echo "This script is used to open the ports for the Docker Swarm cluster to work..."
 echo ""
-sleep 10
+sleep 3
 
 # Prompt for the private IP range
 read -p "Enter the private IP range (e.g., 10.0.0.0/16): " private_ip_range
@@ -16,5 +16,5 @@ sudo ufw allow from $private_ip_range to any port 7946 proto udp
 sudo ufw allow from $private_ip_range to any port 4789 proto udp
 echo ""
 
-echo "Post setup completed successfully. Unless this is the first manager node, you can now run the following to add this node to a Docker Swarm cluster."
+echo "Completed! You can now run the following to add this node to a Docker Swarm cluster (unless it's the first manager node)"
 echo "sudo -u admin bash /tmp/join-swarm-cluster.sh"
