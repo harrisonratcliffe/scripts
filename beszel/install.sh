@@ -425,4 +425,7 @@ EOF
   fi
 fi
 
+printf "Adding the auto-update cron for the agent..."
+echo "0 2 * * * /opt/beszel-agent/beszel-agent update | grep -q "Successfully updated" && systemctl restart beszel-agent" >> /var/spool/cron/crontabs/root
+
 printf "\n\033[32mBeszel Agent has been installed successfully! It is now running on port $PORT.\033[0m\n"
