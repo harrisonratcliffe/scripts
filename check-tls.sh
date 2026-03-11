@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # check_tls.sh - Check which TLS versions are enabled on a domain
+# Uses nmap's ssl-enum-ciphers script (independent of system OpenSSL)
 # Usage: ./check_tls.sh <domain> [port]
 
 DOMAIN="${1}"
@@ -13,8 +14,11 @@ if [[ -z "$DOMAIN" ]]; then
   exit 1
 fi
 
-if ! command -v openssl &>/dev/null; then
-  echo "Error: openssl is not installed."
+if ! command -v nmap &>/dev/null; then
+  echo "Error: nmap is not installed."
+  echo "  macOS:  brew install nmap"
+  echo "  Ubuntu: sudo apt install nmap"
+  echo "  CentOS: sudo yum install nmap"
   exit 1
 fi
 
@@ -31,56 +35,41 @@ echo -e "${BOLD}TLS Version Check${RESET}"
 echo -e "Host: ${BOLD}${DOMAIN}:${PORT}${RESET}"
 echo "─────────────────────────────────────"
 
-check_tls() {
-  local version_flag="$1"
-  local version_name="$2"
+# Run nmap ssl-enum-ciphers and capture output
+NMAP_OUTPUT=$(nmap --script ssl-enum-ciphers -p "${PORT}" "${DOMAIN}" 2>&1)
+
+# Check nmap actually connected
+if echo "$NMAP_OUTPUT" | grep -q "Host seems down\|0 hosts up\|Failed to resolve"; then
+  echo -e "${RED}Error: Could not reach ${DOMAIN}:${PORT}${RESET}"
+  exit 1
+fi
+
+check_version() {
+  local label="$1"
+  local search="$2"
   local deprecated="$3"
 
-  result=$(echo "" | timeout 5 openssl s_client \
-    -connect "${DOMAIN}:${PORT}" \
-    ${version_flag} \
-    -servername "${DOMAIN}" \
-    2>&1)
-
-  # Check if openssl itself doesn't support this version (not a server result)
-  if echo "$result" | grep -qiE "unknown option|unsupported option|Option unknown|no protocols available|ssl[23]? support|wrong version number|no cipher|SSL routines.*version"; then
-    echo -e "  ${version_name}  ${GRAY}—  UNKNOWN${RESET}  ${GRAY}(openssl build doesn't support this version)${RESET}"
-    return
-  fi
-
-  # Successful handshake = server accepted this TLS version
-  if echo "$result" | grep -qE "BEGIN CERTIFICATE|Cipher    :|Cipher is [^(none)]|SSL-Session"; then
+  if echo "$NMAP_OUTPUT" | grep -q "$search"; then
     if [[ "$deprecated" == "true" ]]; then
-      echo -e "  ${version_name}  ${RED}✖  ENABLED${RESET}  ${YELLOW}(insecure — should be disabled)${RESET}"
+      echo -e "  ${label}  ${RED}✖  ENABLED${RESET}  ${YELLOW}(insecure — should be disabled)${RESET}"
     else
-      echo -e "  ${version_name}  ${GREEN}✔  ENABLED${RESET}"
+      echo -e "  ${label}  ${GREEN}✔  ENABLED${RESET}"
     fi
-  # Server explicitly rejected/closed = disabled
-  elif echo "$result" | grep -qiE "alert|handshake failure|no protocols|connection refused|CONNECTED.*errno|ssl handshake failure|tlsv1 alert|no shared cipher|peer error"; then
-    if [[ "$deprecated" == "true" ]]; then
-      echo -e "  ${version_name}  ${GREEN}✔  DISABLED${RESET}  ${GRAY}(correctly disabled)${RESET}"
-    else
-      echo -e "  ${version_name}  ${RED}✖  DISABLED${RESET}"
-    fi
-  # Timeout or connection issue
-  elif echo "$result" | grep -qiE "timeout|Connection timed out|connect:errno"; then
-    echo -e "  ${version_name}  ${GRAY}—  TIMEOUT${RESET}"
   else
-    # Fallback: treat non-handshake as disabled
     if [[ "$deprecated" == "true" ]]; then
-      echo -e "  ${version_name}  ${GREEN}✔  DISABLED${RESET}  ${GRAY}(correctly disabled)${RESET}"
+      echo -e "  ${label}  ${GREEN}✔  DISABLED${RESET}  ${GRAY}(correctly disabled)${RESET}"
     else
-      echo -e "  ${version_name}  ${RED}✖  DISABLED${RESET}"
+      echo -e "  ${label}  ${RED}✖  DISABLED${RESET}"
     fi
   fi
 }
 
-check_tls "-ssl2"   "SSL 2.0" "true"
-check_tls "-ssl3"   "SSL 3.0" "true"
-check_tls "-tls1"   "TLS 1.0" "true"
-check_tls "-tls1_1" "TLS 1.1" "true"
-check_tls "-tls1_2" "TLS 1.2" "false"
-check_tls "-tls1_3" "TLS 1.3" "false"
+check_version "SSL 2.0" "SSLv2"   "true"
+check_version "SSL 3.0" "SSLv3"   "true"
+check_version "TLS 1.0" "TLSv1.0" "true"
+check_version "TLS 1.1" "TLSv1.1" "true"
+check_version "TLS 1.2" "TLSv1.2" "false"
+check_version "TLS 1.3" "TLSv1.3" "false"
 
 echo "─────────────────────────────────────"
 echo ""
