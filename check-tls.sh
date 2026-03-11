@@ -25,14 +25,20 @@ echo -e "${BOLD}TLS Version Check${RESET}"
 echo -e "Host: ${BOLD}${DOMAIN}:${PORT}${RESET}"
 echo "─────────────────────────────────────"
 
+# Check if openssl is available
+if ! command -v openssl &>/dev/null; then
+  echo -e "${RED}Error: openssl is not installed.${RESET}"
+  exit 1
+fi
+
 check_tls() {
-  local version_flag="$1"
+  local disable_flags="$1"
   local version_name="$2"
   local deprecated="$3"
 
   result=$(echo "" | timeout 5 openssl s_client \
     -connect "${DOMAIN}:${PORT}" \
-    ${version_flag} \
+    ${disable_flags} \
     -servername "${DOMAIN}" \
     2>&1)
 
@@ -51,18 +57,12 @@ check_tls() {
   fi
 }
 
-# Check if openssl is available
-if ! command -v openssl &>/dev/null; then
-  echo -e "${RED}Error: openssl is not installed.${RESET}"
-  exit 1
-fi
-
-check_tls "-ssl2"    "SSL 2.0  " "true"
-check_tls "-ssl3"    "SSL 3.0  " "true"
-check_tls "-tls1"    "TLS 1.0  " "true"
-check_tls "-tls1_1"  "TLS 1.1  " "true"
-check_tls "-tls1_2"  "TLS 1.2  " "false"
-check_tls "-tls1_3"  "TLS 1.3  " "false"
+# Isolate each version by disabling all others with -no_* flags
+check_tls "-no_tls1   -no_tls1_1 -no_tls1_2 -no_tls1_3"  "SSL 3.0  " "true"
+check_tls "-no_ssl3   -no_tls1_1 -no_tls1_2 -no_tls1_3"  "TLS 1.0  " "true"
+check_tls "-no_ssl3   -no_tls1   -no_tls1_2 -no_tls1_3"  "TLS 1.1  " "true"
+check_tls "-no_ssl3   -no_tls1   -no_tls1_1 -no_tls1_3"  "TLS 1.2  " "false"
+check_tls "-no_ssl3   -no_tls1   -no_tls1_1 -no_tls1_2"  "TLS 1.3  " "false"
 
 echo "─────────────────────────────────────"
 echo ""
