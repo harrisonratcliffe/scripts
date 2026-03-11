@@ -33,7 +33,7 @@ RESET='\033[0m'
 echo ""
 echo -e "${BOLD}TLS Version Check${RESET}"
 echo -e "Host: ${BOLD}${DOMAIN}:${PORT}${RESET}"
-echo "─────────────────────────────────────"
+echo "────────────────────────────────────────────────────"
 
 # Run nmap ssl-enum-ciphers and capture output
 NMAP_OUTPUT=$(nmap --script ssl-enum-ciphers -p "${PORT}" "${DOMAIN}" 2>&1)
@@ -71,5 +71,5 @@ check_version "TLS 1.1" "TLSv1.1" "true"
 check_version "TLS 1.2" "TLSv1.2" "false"
 check_version "TLS 1.3" "TLSv1.3" "false"
 
-echo "─────────────────────────────────────"
+echo "────────────────────────────────────────────────────"
 echo ""
