@@ -23,7 +23,7 @@ RESET='\033[0m'
 echo ""
 echo -e "${BOLD}TLS Version Check${RESET}"
 echo -e "Host: ${BOLD}${DOMAIN}:${PORT}${RESET}"
-echo "─────────────────────────────────────"
+echo "─────────────────────────────────────────────────────"
 
 # Check if openssl is available
 if ! command -v openssl &>/dev/null; then
@@ -64,5 +64,5 @@ check_tls "-no_ssl3   -no_tls1   -no_tls1_2 -no_tls1_3"  "TLS 1.1  " "true"
 check_tls "-no_ssl3   -no_tls1   -no_tls1_1 -no_tls1_3"  "TLS 1.2  " "false"
 check_tls "-no_ssl3   -no_tls1   -no_tls1_1 -no_tls1_2"  "TLS 1.3  " "false"
 
-echo "─────────────────────────────────────"
+echo "─────────────────────────────────────────────────────"
 echo ""
