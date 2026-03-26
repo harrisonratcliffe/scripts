@@ -73,11 +73,11 @@ CORES="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo "?")
 # --- Results banner ---
 echo "=== Resource Usage Average Over ${SECONDS_WINDOW} Seconds ==="
 echo ""
-echo "CPU: ${CPU_AVG}%"
+echo "CPU: ${CPU_AVG}% (CPU cores: ${CORES})"
 echo "RAM: ${MEM_USED_GB}GB (${MEM_PCT}% of ${MEM_TOTAL_GB}GB)"
 echo "Disk (/): ${USEP} used  (${USED}/${SZ}, free ${AVAIL})  device: ${FS}"
 echo ""
-echo "Load Average (1m/5m/15m): ${LOAD1} ${LOAD5} ${LOAD15}  (CPU cores: ${CORES})"
+echo "Load Average (1m/5m/15m): ${LOAD1} ${LOAD5} ${LOAD15} "
 echo "Run Queue Avg (r): ${RQ_AVG}   Blocked Avg (b): ${BQ_AVG}"
 echo ""
 echo "Network (avg over window): RX ${RX_Mbps} Mbps   TX ${TX_Mbps} Mbps"
