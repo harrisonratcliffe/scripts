@@ -22,7 +22,7 @@ if [ -z "$PID" ] || [ "$PID" -eq 0 ]; then
 fi
 
 echo "Monitoring '$SERVICE' (PID: $PID) for ${DURATION}s..."
-echo "-------------------------------------------"
+echo "-------------------------------------------------------------------"
 
 CPU_TOTAL=0
 RAM_TOTAL=0
@@ -51,7 +51,7 @@ for i in $(seq 1 "$DURATION"); do
 done
 
 echo ""
-echo "-------------------------------------------"
+echo "-------------------------------------------------------------------"
 
 if [ "$COUNT" -eq 0 ]; then
   echo "Error: No samples collected."
@@ -65,4 +65,4 @@ echo "Service : $SERVICE"
 echo "Samples : $COUNT"
 echo "Avg CPU : ${AVG_CPU}%"
 echo "Avg RAM : ${AVG_RAM} MB"
-echo "-------------------------------------------"
+echo "-------------------------------------------------------------------"
