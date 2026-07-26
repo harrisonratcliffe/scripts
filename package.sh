@@ -5,7 +5,7 @@ set -euo pipefail
 
 SRC="${1:?usage: ./package.sh <template-folder> <output-name>}"
 NAME="${2:?usage: ./package.sh <template-folder> <output-name>}"
-DIST="${NAME}-dist"
+DIST="${NAME}"
 
 rm -rf "$DIST" "${NAME}.zip"
 cp -r "$SRC" "$DIST"
