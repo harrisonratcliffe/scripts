@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-# Ensure the script is run as root
+# Ensure script is run as root
 if [[ $EUID -ne 0 ]]; then
    echo "[!] This script must be run as root."
    exit 1
@@ -96,10 +96,11 @@ fi
 # 1.6 Security Layer Selection
 echo ""
 echo "Select intrusion detection layer:"
-echo "  1) CrowdSec + Firewall Bouncer (Modern, community blocklists)"
-echo "  2) Fail2Ban (Classic log-watcher)"
-echo "  3) None / Skip"
-read -rp "Choice [1-3, Default: 1]: " SEC_CHOICE
+echo "  1) CrowdSec + Firewall Bouncer (Recommended)"
+echo "  2) Fail2Ban"
+echo "  3) Both (CrowdSec + Fail2Ban)"
+echo "  4) None / Skip"
+read -rp "Choice [1-4, Default: 1]: " SEC_CHOICE
 SEC_CHOICE=${SEC_CHOICE:-1}
 
 # 1.7 Docker Engine Installation
@@ -139,7 +140,7 @@ apt-get install -y \
     net-tools \
     systemd-timesyncd
 
-# Enable and enforce accurate network time sync
+# Enable network time synchronization
 timedatectl set-ntp true
 
 # ------------------------------------------------------------------------------
@@ -250,11 +251,11 @@ if [[ "$CONFIGURE_SWAP" =~ ^[Yy]$ ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 7. Intrusion Prevention (CrowdSec or Fail2Ban)
+# 7. Intrusion Prevention (CrowdSec / Fail2Ban)
 # ------------------------------------------------------------------------------
 echo -e "\n${BLUE}[6/8] Configuring intrusion detection layer...${NC}"
 
-if [[ "$SEC_CHOICE" == "1" ]]; then
+if [[ "$SEC_CHOICE" == "1" || "$SEC_CHOICE" == "3" ]]; then
     echo -e "${GREEN}[*] Installing CrowdSec Security Engine + Firewall Bouncer...${NC}"
     curl -s https://install.crowdsec.net | sh
     apt-get update -y
@@ -269,8 +270,9 @@ if [[ "$SEC_CHOICE" == "1" ]]; then
     cscli collections install crowdsecurity/linux
     cscli collections install crowdsecurity/sshd
     systemctl restart crowdsec
+fi
 
-elif [[ "$SEC_CHOICE" == "2" ]]; then
+if [[ "$SEC_CHOICE" == "2" || "$SEC_CHOICE" == "3" ]]; then
     echo -e "${GREEN}[*] Installing and configuring Fail2Ban...${NC}"
     apt-get install -y fail2ban
     
@@ -287,7 +289,9 @@ backend = systemd
 EOF
     systemctl enable fail2ban
     systemctl restart fail2ban
-else
+fi
+
+if [[ "$SEC_CHOICE" == "4" ]]; then
     echo -e "${YELLOW}[*] Skipping intrusion detection setup.${NC}"
 fi
 
