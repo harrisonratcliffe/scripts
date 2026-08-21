@@ -48,8 +48,75 @@ read -rp "Run full 'apt update && apt upgrade -y'? [Y/n]: " DO_UPGRADE
 DO_UPGRADE=${DO_UPGRADE:-Y}
 
 # ------------------------------------------------------------------------------
-# 1.2 Non-root Admin Username
+# 1.2 Hostname
 # ------------------------------------------------------------------------------
+
+CURRENT_HOSTNAME="$(hostname)"
+
+echo ""
+echo -e "Current hostname: ${CYAN}${CURRENT_HOSTNAME}${NC}"
+
+read -rp "Change the system hostname? [y/N]: " CHANGE_HOSTNAME
+CHANGE_HOSTNAME=${CHANGE_HOSTNAME:-N}
+
+NEW_HOSTNAME="$CURRENT_HOSTNAME"
+
+if [[ "$CHANGE_HOSTNAME" =~ ^[Yy]$ ]]; then
+
+    echo ""
+    echo "You may enter a short name (web01) or a fully qualified name (web01.example.com)."
+    echo ""
+
+    while true; do
+
+        read -rp "Enter new hostname: " NEW_HOSTNAME
+
+        # Strip a trailing dot if the user typed an absolute FQDN.
+        NEW_HOSTNAME="${NEW_HOSTNAME%.}"
+
+        if [[ -z "$NEW_HOSTNAME" ]]; then
+            echo -e "${RED}[!] Hostname cannot be empty.${NC}"
+            continue
+        fi
+
+        if (( ${#NEW_HOSTNAME} > 253 )); then
+            echo -e "${RED}[!] Hostname exceeds the 253 character maximum.${NC}"
+            continue
+        fi
+
+        # Validate each dot-separated label: alphanumeric, may contain internal
+        # hyphens, 1-63 characters, must not start or end with a hyphen.
+        HOSTNAME_VALID="Y"
+
+        IFS='.' read -ra HOSTNAME_LABELS <<< "$NEW_HOSTNAME"
+
+        for LABEL in "${HOSTNAME_LABELS[@]}"; do
+
+            if [[ ! "$LABEL" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
+                HOSTNAME_VALID="N"
+                break
+            fi
+
+        done
+
+        if [[ "$HOSTNAME_VALID" == "Y" ]]; then
+            break
+        fi
+
+        echo -e "${RED}[!] Invalid hostname. Use letters, numbers and hyphens; each label must be 1-63 characters and must not begin or end with a hyphen.${NC}"
+
+    done
+
+fi
+
+# Short name is everything before the first dot; used as the /etc/hosts alias.
+NEW_HOSTNAME_SHORT="${NEW_HOSTNAME%%.*}"
+
+# ------------------------------------------------------------------------------
+# 1.3 Non-root Admin Username
+# ------------------------------------------------------------------------------
+
+echo ""
 
 while true; do
     read -rp "Enter new administrative username (e.g. deployer): " NEW_USER
@@ -62,7 +129,7 @@ while true; do
 done
 
 # ------------------------------------------------------------------------------
-# 1.3 SSH Public Key Input
+# 1.4 SSH Public Key Input
 # ------------------------------------------------------------------------------
 
 echo ""
@@ -76,7 +143,7 @@ while [[ -z "$USER_SSH_KEY" ]]; do
 done
 
 # ------------------------------------------------------------------------------
-# 1.4 SSH Port Setup
+# 1.5 SSH Port Setup
 # ------------------------------------------------------------------------------
 
 echo ""
@@ -107,7 +174,7 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 1.5 Trusted IP / CIDR Whitelist
+# 1.6 Trusted IP / CIDR Whitelist
 # ------------------------------------------------------------------------------
 
 echo ""
@@ -166,7 +233,7 @@ if [[ "$ENABLE_WHITELIST" =~ ^[Yy]$ ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 1.6 Dynamic SWAP Calculator
+# 1.7 Dynamic SWAP Calculator
 # ------------------------------------------------------------------------------
 
 echo ""
@@ -218,7 +285,7 @@ if [[ "$CONFIGURE_SWAP" =~ ^[Yy]$ ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 1.7 Security Layer Selection
+# 1.8 Security Layer Selection
 # ------------------------------------------------------------------------------
 
 echo ""
@@ -244,7 +311,7 @@ while true; do
 done
 
 # ------------------------------------------------------------------------------
-# 1.8 Docker Engine Installation
+# 1.9 Docker Engine Installation
 # ------------------------------------------------------------------------------
 
 echo ""
@@ -259,6 +326,13 @@ INSTALL_DOCKER=${INSTALL_DOCKER:-Y}
 echo ""
 echo -e "${GREEN}Configuration captured.${NC}"
 echo ""
+
+if [[ "$CHANGE_HOSTNAME" =~ ^[Yy]$ ]]; then
+    echo "  Hostname:         ${CURRENT_HOSTNAME} -> ${NEW_HOSTNAME}"
+else
+    echo "  Hostname:         ${CURRENT_HOSTNAME} (unchanged)"
+fi
+
 echo "  Admin user:       ${NEW_USER}"
 echo "  SSH port:         ${SSH_PORT}"
 
@@ -291,7 +365,7 @@ echo ""
 
 export DEBIAN_FRONTEND=noninteractive
 
-echo -e "\n${BLUE}[1/8] Updating package index and installing essentials...${NC}"
+echo -e "\n${BLUE}[1/9] Updating package index and installing essentials...${NC}"
 
 apt-get update -y
 
@@ -322,7 +396,82 @@ apt-get install -y \
 timedatectl set-ntp true
 
 # ==============================================================================
-# 3. Validate Trusted Firewall Sources
+# 3. Hostname Configuration
+# ==============================================================================
+
+echo -e "\n${BLUE}[2/9] Configuring hostname...${NC}"
+
+if [[ "$CHANGE_HOSTNAME" =~ ^[Yy]$ ]]; then
+
+    echo -e "${BLUE}[*] Setting hostname to '${NEW_HOSTNAME}'...${NC}"
+
+    hostnamectl set-hostname "$NEW_HOSTNAME"
+
+    # --------------------------------------------------------------------------
+    # /etc/hosts
+    #
+    # Debian convention: the 127.0.1.1 line carries the machine's own name so
+    # that "hostname -f" and anything calling gethostbyname() resolves locally
+    # even with no DNS. Leave the 127.0.0.1 localhost line alone.
+    # --------------------------------------------------------------------------
+
+    cp -a /etc/hosts "/etc/hosts.bak.$(date +%Y%m%d%H%M%S)"
+
+    if [[ "$NEW_HOSTNAME" == "$NEW_HOSTNAME_SHORT" ]]; then
+        HOSTS_ENTRY=$'127.0.1.1\t'"${NEW_HOSTNAME}"
+    else
+        HOSTS_ENTRY=$'127.0.1.1\t'"${NEW_HOSTNAME} ${NEW_HOSTNAME_SHORT}"
+    fi
+
+    if grep -qE '^[[:space:]]*127\.0\.1\.1[[:space:]]' /etc/hosts; then
+
+        # Replace the existing 127.0.1.1 mapping in place.
+        awk -v entry="$HOSTS_ENTRY" '
+            /^[[:space:]]*127\.0\.1\.1[[:space:]]/ && !done { print entry; done = 1; next }
+            { print }
+        ' /etc/hosts > /etc/hosts.tmp
+
+        cat /etc/hosts.tmp > /etc/hosts
+        rm -f /etc/hosts.tmp
+
+    else
+
+        printf '%s\n' "$HOSTS_ENTRY" >> /etc/hosts
+
+    fi
+
+    # Remove any stale mapping that still points at the previous short name,
+    # but never touch the loopback localhost line.
+    OLD_SHORT="${CURRENT_HOSTNAME%%.*}"
+
+    if [[ -n "$OLD_SHORT" && "$OLD_SHORT" != "$NEW_HOSTNAME_SHORT" && "$OLD_SHORT" != "localhost" ]]; then
+
+        awk -v old="$OLD_SHORT" '
+            $1 == "127.0.0.1" { print; next }
+            {
+                for (i = 2; i <= NF; i++) {
+                    if ($i == old) { next }
+                }
+                print
+            }
+        ' /etc/hosts > /etc/hosts.tmp
+
+        cat /etc/hosts.tmp > /etc/hosts
+        rm -f /etc/hosts.tmp
+
+    fi
+
+    echo -e "${GREEN}[*] Hostname set. Current /etc/hosts:${NC}"
+    cat /etc/hosts
+
+else
+
+    echo -e "${YELLOW}[*] Hostname unchanged (${CURRENT_HOSTNAME}).${NC}"
+
+fi
+
+# ==============================================================================
+# 4. Validate Trusted Firewall Sources
 # ==============================================================================
 
 if [[ "$ENABLE_WHITELIST" =~ ^[Yy]$ ]]; then
@@ -355,10 +504,10 @@ if [[ "$ENABLE_WHITELIST" =~ ^[Yy]$ ]]; then
 fi
 
 # ==============================================================================
-# 4. User Provisioning & Passwordless Sudo
+# 5. User Provisioning & Passwordless Sudo
 # ==============================================================================
 
-echo -e "\n${BLUE}[2/8] Provisioning user '${NEW_USER}' with passwordless sudo...${NC}"
+echo -e "\n${BLUE}[3/9] Provisioning user '${NEW_USER}' with passwordless sudo...${NC}"
 
 if id "$NEW_USER" &>/dev/null; then
 
@@ -401,17 +550,33 @@ chmod 600 "${USER_SSH_DIR}/authorized_keys"
 chown -R "${NEW_USER}:${NEW_USER}" "$USER_SSH_DIR"
 
 # ==============================================================================
-# 5. Prepare SSH Hardening Configuration
+# 6. Prepare SSH Hardening Configuration
 # ==============================================================================
 
-echo -e "\n${BLUE}[3/8] Preparing SSH hardening on port ${SSH_PORT}...${NC}"
+echo -e "\n${BLUE}[4/9] Preparing SSH hardening on port ${SSH_PORT}...${NC}"
 
 SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
+SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/00-hardening.conf"
+
 SSH_SOCKET_DROPIN_DIR="/etc/systemd/system/ssh.socket.d"
+SSH_SOCKET_DROPIN_FILE="${SSH_SOCKET_DROPIN_DIR}/99-listen.conf"
 
 mkdir -p "$SSHD_DROPIN_DIR"
 
-cat <<EOF > "${SSHD_DROPIN_DIR}/99-hardening.conf"
+# ------------------------------------------------------------------------------
+# NOTE ON THE FILENAME:
+#
+# sshd uses the FIRST value it obtains for any keyword, and the stock
+# sshd_config sources the drop-in directory at the very top of the file.
+# Cloud images ship /etc/ssh/sshd_config.d/50-cloud-init.conf, which sorts
+# before "99-*.conf" and would therefore win. Naming this file 00-hardening.conf
+# guarantees our values are parsed first.
+# ------------------------------------------------------------------------------
+
+# Clean up the drop-in written by earlier revisions of this script.
+rm -f "${SSHD_DROPIN_DIR}/99-hardening.conf"
+
+cat <<EOF > "$SSHD_DROPIN_FILE"
 Port ${SSH_PORT}
 PermitRootLogin no
 PasswordAuthentication no
@@ -423,13 +588,26 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 EOF
 
+# Warn if another drop-in still sets a conflicting Port.
+CONFLICTING_PORTS=$(
+    grep -rlsiE '^[[:space:]]*Port[[:space:]]+' "$SSHD_DROPIN_DIR" 2>/dev/null \
+    | grep -v "^${SSHD_DROPIN_FILE}$" || true
+)
+
+if [[ -n "$CONFLICTING_PORTS" ]]; then
+
+    echo -e "${YELLOW}[*] Other sshd drop-ins also define Port (ours is parsed first):${NC}"
+    printf '    %s\n' $CONFLICTING_PORTS
+
+fi
+
 # Validate sshd configuration BEFORE firewall/socket changes
 if ! sshd -t; then
 
     echo -e "${RED}[!] SSH syntax check failed.${NC}"
     echo -e "${RED}[!] Removing hardening configuration to prevent lockout.${NC}"
 
-    rm -f "${SSHD_DROPIN_DIR}/99-hardening.conf"
+    rm -f "$SSHD_DROPIN_FILE"
 
     exit 1
 
@@ -437,12 +615,26 @@ fi
 
 echo -e "${GREEN}[*] OpenSSH configuration syntax is valid.${NC}"
 
+# Confirm sshd's effective port really is what we asked for.
+EFFECTIVE_PORT=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
+
+if [[ -n "$EFFECTIVE_PORT" && "$EFFECTIVE_PORT" != "$SSH_PORT" ]]; then
+
+    echo -e "${RED}[!] sshd reports an effective port of ${EFFECTIVE_PORT}, not ${SSH_PORT}.${NC}"
+    echo -e "${RED}[!] Another configuration file is overriding the port. Aborting.${NC}"
+
+    rm -f "$SSHD_DROPIN_FILE"
+
+    exit 1
+
+fi
+
 # ------------------------------------------------------------------------------
 # Configure systemd ssh.socket when the unit exists.
 #
-# Ubuntu 24.04 commonly uses socket-activated SSH. In that configuration,
-# changing "Port" in sshd_config alone may not move the actual listening
-# socket.
+# Ubuntu 24.04 uses socket-activated SSH by default. In that mode systemd owns
+# the listening socket and "Port" in sshd_config is ignored entirely, so the
+# socket unit must be overridden as well.
 #
 # Equivalent to:
 #
@@ -452,6 +644,9 @@ echo -e "${GREEN}[*] OpenSSH configuration syntax is valid.${NC}"
 #   ListenStream=
 #   ListenStream=0.0.0.0:922
 #   ListenStream=[::]:922
+#
+# The empty ListenStream= is mandatory: it clears the port 22 entry inherited
+# from the base unit. Without it, systemd APPENDS and SSH listens on both ports.
 # ------------------------------------------------------------------------------
 
 SSH_SOCKET_EXISTS="N"
@@ -466,7 +661,25 @@ if systemctl list-unit-files ssh.socket --no-legend 2>/dev/null \
 
     mkdir -p "$SSH_SOCKET_DROPIN_DIR"
 
-    cat <<EOF > "${SSH_SOCKET_DROPIN_DIR}/99-listen.conf"
+    # Drop-ins are merged in lexicographic order and ListenStream is a LIST, so
+    # a stale override.conf (created by a manual "systemctl edit ssh.socket")
+    # sorts AFTER 99-listen.conf and would re-add its own ports on top of ours.
+    # Remove any other drop-in that touches ListenStream.
+    for EXISTING_DROPIN in "$SSH_SOCKET_DROPIN_DIR"/*.conf; do
+
+        [[ -e "$EXISTING_DROPIN" ]] || continue
+        [[ "$EXISTING_DROPIN" == "$SSH_SOCKET_DROPIN_FILE" ]] && continue
+
+        if grep -qiE '^[[:space:]]*ListenStream[[:space:]]*=' "$EXISTING_DROPIN"; then
+
+            echo -e "${YELLOW}[*] Removing conflicting socket drop-in: ${EXISTING_DROPIN}${NC}"
+            rm -f "$EXISTING_DROPIN"
+
+        fi
+
+    done
+
+    cat <<EOF > "$SSH_SOCKET_DROPIN_FILE"
 [Socket]
 ListenStream=
 ListenStream=0.0.0.0:${SSH_PORT}
@@ -480,10 +693,10 @@ else
 fi
 
 # ==============================================================================
-# 6. UFW Firewall Setup
+# 7. UFW Firewall Setup
 # ==============================================================================
 
-echo -e "\n${BLUE}[4/8] Configuring UFW firewall rules...${NC}"
+echo -e "\n${BLUE}[5/9] Configuring UFW firewall rules...${NC}"
 
 # IMPORTANT:
 # Firewall is configured BEFORE restarting SSH so the desired access rule
@@ -533,30 +746,93 @@ echo ""
 ufw status verbose
 
 # ==============================================================================
-# 7. Apply SSH Socket / Service Changes
+# 8. Apply SSH Socket / Service Changes
 # ==============================================================================
 
 echo -e "\n${BLUE}[*] Applying SSH listener configuration...${NC}"
 
-# Required after adding/changing systemd unit drop-ins
+# Required after adding/changing/removing systemd unit drop-ins.
 systemctl daemon-reload
 
-if [[ "$SSH_SOCKET_EXISTS" == "Y" ]] &&
-   systemctl is-active --quiet ssh.socket; then
+# ------------------------------------------------------------------------------
+# Emergency rollback: restore port 22 access so a failed port change can never
+# leave the box unreachable.
+# ------------------------------------------------------------------------------
 
-    echo -e "${BLUE}[*] Active ssh.socket detected.${NC}"
-    echo -e "${BLUE}[*] Restarting SSH socket on port ${SSH_PORT}...${NC}"
+rollback_ssh() {
 
-    systemctl restart ssh.socket
+    echo -e "${RED}[!] Rolling back SSH port change to restore access on port 22...${NC}"
 
-    # A currently running ssh.service may still have inherited the previous
-    # socket descriptor. Restart it so it receives the newly configured socket.
-    if systemctl is-active --quiet ssh.service; then
+    rm -f "$SSHD_DROPIN_FILE" "$SSH_SOCKET_DROPIN_FILE"
 
-        echo -e "${BLUE}[*] Restarting active ssh.service...${NC}"
-        systemctl restart ssh.service
+    systemctl daemon-reload
+
+    systemctl restart ssh.socket 2>/dev/null || true
+    systemctl restart ssh.service 2>/dev/null \
+        || systemctl restart sshd.service 2>/dev/null \
+        || true
+
+    ufw allow 22/tcp comment 'SSH rollback' >/dev/null 2>&1 || true
+
+    echo -e "${YELLOW}[*] SSH should now be reachable on port 22 again.${NC}"
+    echo -e "${YELLOW}[*] Hardening drop-ins were removed. Investigate before retrying.${NC}"
+
+}
+
+# ------------------------------------------------------------------------------
+# Decide which activation mode is in play.
+#
+# "Enabled" matters as much as "active": ssh.socket can be enabled but inactive
+# at this instant, and it is what will bind the port after any restart.
+# ------------------------------------------------------------------------------
+
+SSH_SOCKET_MODE="N"
+
+if [[ "$SSH_SOCKET_EXISTS" == "Y" ]]; then
+
+    if systemctl is-active --quiet ssh.socket \
+        || systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
+
+        SSH_SOCKET_MODE="Y"
 
     fi
+
+fi
+
+if [[ "$SSH_SOCKET_MODE" == "Y" ]]; then
+
+    echo -e "${BLUE}[*] Socket-activated SSH detected.${NC}"
+
+    # ORDER IS CRITICAL.
+    #
+    # With Accept=no socket activation, a running sshd has already INHERITED the
+    # file descriptor systemd bound to port 22. Restarting ssh.socket while that
+    # process is alive does not move the listener - the old fd stays open and SSH
+    # keeps answering on 22. The service must be stopped FIRST, then the socket
+    # started fresh so it binds the new port and hands down a new descriptor.
+
+    echo -e "${BLUE}[*] Stopping ssh.service (releases the inherited port 22 socket)...${NC}"
+    systemctl stop ssh.service 2>/dev/null || true
+
+    echo -e "${BLUE}[*] Stopping ssh.socket...${NC}"
+    systemctl stop ssh.socket 2>/dev/null || true
+
+    echo -e "${BLUE}[*] Starting ssh.socket on port ${SSH_PORT}...${NC}"
+
+    if ! systemctl start ssh.socket; then
+
+        echo -e "${RED}[!] ssh.socket failed to start.${NC}"
+        systemctl --no-pager --full status ssh.socket 2>/dev/null || true
+        rollback_ssh
+        exit 1
+
+    fi
+
+    systemctl enable ssh.socket >/dev/null 2>&1 || true
+
+    echo -e "${BLUE}[*] Effective socket configuration:${NC}"
+    systemctl cat ssh.socket 2>/dev/null \
+        | grep -iE '^[[:space:]]*ListenStream' || true
 
 else
 
@@ -584,15 +860,42 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# Verify requested SSH port is actually listening
+# Verify the requested SSH port is actually listening
 # ------------------------------------------------------------------------------
 
-sleep 1
+PORT_IS_LISTENING="N"
 
-if ss -ltnH | awk -v port="$SSH_PORT" \
-    '$4 ~ ":" port "$" { found=1 } END { exit !found }'; then
+for ATTEMPT in 1 2 3 4 5; do
+
+    if ss -ltnH 2>/dev/null | awk -v port="$SSH_PORT" \
+        '$4 ~ ":" port "$" { found = 1 } END { exit !found }'; then
+
+        PORT_IS_LISTENING="Y"
+        break
+
+    fi
+
+    sleep 1
+
+done
+
+if [[ "$PORT_IS_LISTENING" == "Y" ]]; then
 
     echo -e "${GREEN}[*] Verified: a TCP listener is active on port ${SSH_PORT}.${NC}"
+
+    # A leftover listener on 22 means the old socket never released. Report it
+    # rather than leaving a silent second entry point open.
+    if [[ "$SSH_PORT" != "22" ]]; then
+
+        if ss -ltnH 2>/dev/null | awk '$4 ~ /:22$/ { found = 1 } END { exit !found }'; then
+
+            echo -e "${YELLOW}[!] Warning: something is STILL listening on port 22.${NC}"
+            echo -e "${YELLOW}[!] Check for a stale sshd process or another sshd_config drop-in:${NC}"
+            ss -ltnp 2>/dev/null | grep ':22 ' || true
+
+        fi
+
+    fi
 
 else
 
@@ -612,15 +915,17 @@ else
 
     ss -ltnp || true
 
+    rollback_ssh
+
     exit 1
 
 fi
 
 # ==============================================================================
-# 8. Kernel Tuning & SWAP Creation
+# 9. Kernel Tuning & SWAP Creation
 # ==============================================================================
 
-echo -e "\n${BLUE}[5/8] Applying kernel network hardening & optimizations...${NC}"
+echo -e "\n${BLUE}[6/9] Applying kernel network hardening & optimizations...${NC}"
 
 cat <<EOF > /etc/sysctl.d/99-network-tuning.conf
 # TCP SYN flood protection
@@ -681,10 +986,10 @@ if [[ "$CONFIGURE_SWAP" =~ ^[Yy]$ ]]; then
 fi
 
 # ==============================================================================
-# 9. Intrusion Prevention
+# 10. Intrusion Prevention
 # ==============================================================================
 
-echo -e "\n${BLUE}[6/8] Configuring intrusion detection layer...${NC}"
+echo -e "\n${BLUE}[7/9] Configuring intrusion detection layer...${NC}"
 
 # ------------------------------------------------------------------------------
 # CrowdSec
@@ -751,10 +1056,10 @@ if [[ "$SEC_CHOICE" == "4" ]]; then
 fi
 
 # ==============================================================================
-# 10. Unattended Security Patches
+# 11. Unattended Security Patches
 # ==============================================================================
 
-echo -e "\n${BLUE}[7/8] Enabling automatic security upgrades...${NC}"
+echo -e "\n${BLUE}[8/9] Enabling automatic security upgrades...${NC}"
 
 cat <<EOF > /etc/apt/apt.conf.d/20auto-upgrades
 APT::Periodic::Update-Package-Lists "1";
@@ -762,12 +1067,12 @@ APT::Periodic::Unattended-Upgrade "1";
 EOF
 
 # ==============================================================================
-# 11. Docker Installation
+# 12. Docker Installation
 # ==============================================================================
 
 if [[ "$INSTALL_DOCKER" =~ ^[Yy]$ ]]; then
 
-    echo -e "\n${BLUE}[8/8] Installing Docker Engine & Docker Compose plugin...${NC}"
+    echo -e "\n${BLUE}[9/9] Installing Docker Engine & Docker Compose plugin...${NC}"
 
     curl -fsSL https://get.docker.com | sh
 
@@ -778,12 +1083,12 @@ if [[ "$INSTALL_DOCKER" =~ ^[Yy]$ ]]; then
 
 else
 
-    echo -e "\n${BLUE}[8/8] Docker installation skipped.${NC}"
+    echo -e "\n${BLUE}[9/9] Docker installation skipped.${NC}"
 
 fi
 
 # ==============================================================================
-# 12. Completion Summary
+# 13. Completion Summary
 # ==============================================================================
 
 SERVER_IP=$(
@@ -799,8 +1104,16 @@ echo ""
 
 echo -e "Connection & Access Details:"
 echo ""
+echo -e "  Hostname:        ${GREEN}$(hostname)${NC}"
 echo -e "  Admin User:      ${GREEN}${NEW_USER}${NC}"
 echo -e "  SSH Port:        ${GREEN}${SSH_PORT}${NC}"
+
+if [[ "$SSH_SOCKET_MODE" == "Y" ]]; then
+    echo -e "  SSH Activation:  ${CYAN}systemd ssh.socket${NC}"
+else
+    echo -e "  SSH Activation:  ${CYAN}ssh.service (traditional)${NC}"
+fi
+
 echo -e "  Root Login:      ${RED}Disabled${NC}"
 echo -e "  Password Auth:   ${RED}Disabled (SSH Key Only)${NC}"
 
