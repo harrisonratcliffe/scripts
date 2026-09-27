@@ -3,10 +3,65 @@
 # ==============================================================================
 # Script: build-ubuntu.sh
 # Production Server Provisioning & Hardening Wizard
-# Target OS: Ubuntu 22.04 / 24.04 LTS & Debian 11 / 12
+# Target OS: Ubuntu 22.04 / 24.04 / 26.04 LTS & Debian 11 / 12
 # ==============================================================================
 
-set -euo pipefail
+set -Eeuo pipefail
+
+# ------------------------------------------------------------------------------
+# PIPELINE RULE (read before editing):
+#
+# With "pipefail" enabled, never END a pipeline with a command that stops
+# reading early (awk '{...; exit}', head, grep -q, grep -m, sed q). The writer
+# receives SIGPIPE, the pipeline returns 141, and "set -e" aborts the script.
+# Capture the output into a variable first, then parse the variable.
+# ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
+# Error handling
+#
+# Any unexpected failure prints the line and command that failed instead of
+# stopping silently. If it happens while SSH / firewall changes are in flight,
+# the SSH port change is rolled back so port 22 remains reachable.
+# ------------------------------------------------------------------------------
+
+SSH_CHANGES_IN_FLIGHT="N"
+
+on_error() {
+
+    local rc="$1"
+    local line="$2"
+    local cmd="$3"
+
+    # With errtrace (-E) the trap also fires inside command substitutions.
+    # Let the parent shell report the failure once, not twice.
+    if (( BASH_SUBSHELL > 0 )); then
+        return
+    fi
+
+    trap - ERR
+
+    echo -e "\033[0;31m[!] Script aborted: exit code ${rc} at line ${line}\033[0m" >&2
+    echo -e "\033[0;31m[!] Failed command: ${cmd}\033[0m" >&2
+
+    if [[ "$SSH_CHANGES_IN_FLIGHT" == "Y" ]] && declare -F rollback_ssh >/dev/null; then
+        rollback_ssh || true
+    fi
+
+    exit "$rc"
+
+}
+
+trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
+
+# True if systemd knows the unit. No pipeline, so no SIGPIPE risk.
+unit_exists() {
+    systemctl cat "$1" &>/dev/null
+}
 
 # ------------------------------------------------------------------------------
 # Root check
@@ -561,6 +616,34 @@ SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/00-hardening.conf"
 SSH_SOCKET_DROPIN_DIR="/etc/systemd/system/ssh.socket.d"
 SSH_SOCKET_DROPIN_FILE="${SSH_SOCKET_DROPIN_DIR}/99-listen.conf"
 
+# ------------------------------------------------------------------------------
+# Emergency rollback: restore port 22 access so a failed port change can never
+# leave the box unreachable. Defined here so the ERR trap can use it from the
+# moment the first SSH file is written.
+# ------------------------------------------------------------------------------
+
+rollback_ssh() {
+
+    SSH_CHANGES_IN_FLIGHT="N"
+
+    echo -e "${RED}[!] Rolling back SSH port change to restore access on port 22...${NC}"
+
+    rm -f "$SSHD_DROPIN_FILE" "$SSH_SOCKET_DROPIN_FILE"
+
+    systemctl daemon-reload || true
+
+    systemctl restart ssh.socket 2>/dev/null || true
+    systemctl restart ssh.service 2>/dev/null \
+        || systemctl restart sshd.service 2>/dev/null \
+        || true
+
+    ufw allow 22/tcp comment 'SSH rollback' >/dev/null 2>&1 || true
+
+    echo -e "${YELLOW}[*] SSH should now be reachable on port 22 again.${NC}"
+    echo -e "${YELLOW}[*] Hardening drop-ins were removed. Investigate before retrying.${NC}"
+
+}
+
 mkdir -p "$SSHD_DROPIN_DIR"
 
 # ------------------------------------------------------------------------------
@@ -575,6 +658,9 @@ mkdir -p "$SSHD_DROPIN_DIR"
 
 # Clean up the drop-in written by earlier revisions of this script.
 rm -f "${SSHD_DROPIN_DIR}/99-hardening.conf"
+
+# From here until the new port is verified, any unexpected failure rolls back.
+SSH_CHANGES_IN_FLIGHT="Y"
 
 cat <<EOF > "$SSHD_DROPIN_FILE"
 Port ${SSH_PORT}
@@ -608,6 +694,7 @@ if ! sshd -t; then
     echo -e "${RED}[!] Removing hardening configuration to prevent lockout.${NC}"
 
     rm -f "$SSHD_DROPIN_FILE"
+    SSH_CHANGES_IN_FLIGHT="N"
 
     exit 1
 
@@ -616,7 +703,12 @@ fi
 echo -e "${GREEN}[*] OpenSSH configuration syntax is valid.${NC}"
 
 # Confirm sshd's effective port really is what we asked for.
-EFFECTIVE_PORT=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
+#
+# Capture first, then parse. Piping "sshd -T" into an awk that exits on the
+# first match kills sshd with SIGPIPE, and pipefail + set -e then aborts the
+# whole script silently.
+SSHD_EFFECTIVE_CONFIG=$(sshd -T 2>/dev/null) || SSHD_EFFECTIVE_CONFIG=""
+EFFECTIVE_PORT=$(awk '/^port / && !found { print $2; found = 1 }' <<< "$SSHD_EFFECTIVE_CONFIG")
 
 if [[ -n "$EFFECTIVE_PORT" && "$EFFECTIVE_PORT" != "$SSH_PORT" ]]; then
 
@@ -624,6 +716,7 @@ if [[ -n "$EFFECTIVE_PORT" && "$EFFECTIVE_PORT" != "$SSH_PORT" ]]; then
     echo -e "${RED}[!] Another configuration file is overriding the port. Aborting.${NC}"
 
     rm -f "$SSHD_DROPIN_FILE"
+    SSH_CHANGES_IN_FLIGHT="N"
 
     exit 1
 
@@ -632,7 +725,7 @@ fi
 # ------------------------------------------------------------------------------
 # Configure systemd ssh.socket when the unit exists.
 #
-# Ubuntu 24.04 uses socket-activated SSH by default. In that mode systemd owns
+# Ubuntu 24.04+ uses socket-activated SSH by default. In that mode systemd owns
 # the listening socket and "Port" in sshd_config is ignored entirely, so the
 # socket unit must be overridden as well.
 #
@@ -651,9 +744,7 @@ fi
 
 SSH_SOCKET_EXISTS="N"
 
-if systemctl list-unit-files ssh.socket --no-legend 2>/dev/null \
-    | awk '{print $1}' \
-    | grep -qx 'ssh.socket'; then
+if unit_exists ssh.socket; then
 
     SSH_SOCKET_EXISTS="Y"
 
@@ -755,31 +846,6 @@ echo -e "\n${BLUE}[*] Applying SSH listener configuration...${NC}"
 systemctl daemon-reload
 
 # ------------------------------------------------------------------------------
-# Emergency rollback: restore port 22 access so a failed port change can never
-# leave the box unreachable.
-# ------------------------------------------------------------------------------
-
-rollback_ssh() {
-
-    echo -e "${RED}[!] Rolling back SSH port change to restore access on port 22...${NC}"
-
-    rm -f "$SSHD_DROPIN_FILE" "$SSH_SOCKET_DROPIN_FILE"
-
-    systemctl daemon-reload
-
-    systemctl restart ssh.socket 2>/dev/null || true
-    systemctl restart ssh.service 2>/dev/null \
-        || systemctl restart sshd.service 2>/dev/null \
-        || true
-
-    ufw allow 22/tcp comment 'SSH rollback' >/dev/null 2>&1 || true
-
-    echo -e "${YELLOW}[*] SSH should now be reachable on port 22 again.${NC}"
-    echo -e "${YELLOW}[*] Hardening drop-ins were removed. Investigate before retrying.${NC}"
-
-}
-
-# ------------------------------------------------------------------------------
 # Decide which activation mode is in play.
 #
 # "Enabled" matters as much as "active": ssh.socket can be enabled but inactive
@@ -838,21 +904,18 @@ else
 
     echo -e "${BLUE}[*] Using traditional SSH service activation...${NC}"
 
-    if systemctl list-unit-files ssh.service --no-legend 2>/dev/null \
-        | awk '{print $1}' \
-        | grep -qx 'ssh.service'; then
+    if unit_exists ssh.service; then
 
         systemctl restart ssh.service
 
-    elif systemctl list-unit-files sshd.service --no-legend 2>/dev/null \
-        | awk '{print $1}' \
-        | grep -qx 'sshd.service'; then
+    elif unit_exists sshd.service; then
 
         systemctl restart sshd.service
 
     else
 
         echo -e "${RED}[!] Could not locate ssh.service or sshd.service.${NC}"
+        rollback_ssh
         exit 1
 
     fi
@@ -867,8 +930,10 @@ PORT_IS_LISTENING="N"
 
 for ATTEMPT in 1 2 3 4 5; do
 
-    if ss -ltnH 2>/dev/null | awk -v port="$SSH_PORT" \
-        '$4 ~ ":" port "$" { found = 1 } END { exit !found }'; then
+    LISTENERS=$(ss -ltnH 2>/dev/null) || LISTENERS=""
+
+    if awk -v port="$SSH_PORT" \
+        '$4 ~ ":" port "$" { found = 1 } END { exit !found }' <<< "$LISTENERS"; then
 
         PORT_IS_LISTENING="Y"
         break
@@ -883,11 +948,16 @@ if [[ "$PORT_IS_LISTENING" == "Y" ]]; then
 
     echo -e "${GREEN}[*] Verified: a TCP listener is active on port ${SSH_PORT}.${NC}"
 
+    # SSH changes are applied and verified; the rollback window is closed.
+    SSH_CHANGES_IN_FLIGHT="N"
+
     # A leftover listener on 22 means the old socket never released. Report it
     # rather than leaving a silent second entry point open.
     if [[ "$SSH_PORT" != "22" ]]; then
 
-        if ss -ltnH 2>/dev/null | awk '$4 ~ /:22$/ { found = 1 } END { exit !found }'; then
+        LISTENERS=$(ss -ltnH 2>/dev/null) || LISTENERS=""
+
+        if awk '$4 ~ /:22$/ { found = 1 } END { exit !found }' <<< "$LISTENERS"; then
 
             echo -e "${YELLOW}[!] Warning: something is STILL listening on port 22.${NC}"
             echo -e "${YELLOW}[!] Check for a stale sshd process or another sshd_config drop-in:${NC}"
@@ -1156,6 +1226,13 @@ if [[ "$ENABLE_WHITELIST" =~ ^[Yy]$ ]]; then
     echo -e "${RED}IMPORTANT:${NC}"
     echo -e "Your current public IP must match one of the trusted IP/CIDR entries."
     echo -e "SSH connections from every other source will be blocked by UFW."
+    echo ""
+
+fi
+
+if [[ -f /var/run/reboot-required ]]; then
+
+    echo -e "${YELLOW}[*] A reboot is required (e.g. new kernel). Reboot only AFTER confirming SSH access above.${NC}"
     echo ""
 
 fi
