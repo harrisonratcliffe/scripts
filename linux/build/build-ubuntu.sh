@@ -630,12 +630,26 @@ rollback_ssh() {
 
     rm -f "$SSHD_DROPIN_FILE" "$SSH_SOCKET_DROPIN_FILE"
 
+    # Re-runs the Ubuntu sshd socket generator, which now sees port 22 again.
     systemctl daemon-reload || true
 
-    systemctl restart ssh.socket 2>/dev/null || true
-    systemctl restart ssh.service 2>/dev/null \
-        || systemctl restart sshd.service 2>/dev/null \
-        || true
+    if systemctl is-enabled --quiet ssh.socket 2>/dev/null \
+        || systemctl is-active --quiet ssh.socket 2>/dev/null; then
+
+        # Same order as the forward path: a running sshd holds the inherited
+        # listener, so stop the service BEFORE re-binding the socket.
+        # (KillMode=process keeps existing SSH sessions alive.)
+        systemctl stop ssh.service 2>/dev/null || true
+        systemctl stop ssh.socket 2>/dev/null || true
+        systemctl start ssh.socket 2>/dev/null || true
+
+    else
+
+        systemctl restart ssh.service 2>/dev/null \
+            || systemctl restart sshd.service 2>/dev/null \
+            || true
+
+    fi
 
     ufw allow 22/tcp comment 'SSH rollback' >/dev/null 2>&1 || true
 
