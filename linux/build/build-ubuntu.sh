@@ -64,6 +64,38 @@ unit_exists() {
 }
 
 # ------------------------------------------------------------------------------
+# systemd / D-Bus health check
+#
+# Almost every SSH step (and the rollback) depends on systemctl. If PID 1 or
+# the system bus is unreachable - e.g. after an upgrade re-executed systemd or
+# deferred a dbus restart - the script must stop BEFORE touching SSH, because
+# it would not be able to roll a failed port change back.
+# ------------------------------------------------------------------------------
+
+check_system_bus() {
+
+    local stage="$1"
+    local problem=""
+
+    if ! systemctl show --property=Version --value >/dev/null 2>&1; then
+        problem="systemctl cannot reach systemd (PID 1)"
+    elif ! busctl --system list --no-pager >/dev/null 2>&1; then
+        problem="the D-Bus system bus is not responding"
+    fi
+
+    if [[ -n "$problem" ]]; then
+
+        echo -e "\033[0;31m[!] Health check failed (${stage}): ${problem}.\033[0m" >&2
+        echo -e "\033[0;31m[!] Stopping before any SSH or firewall changes are made.\033[0m" >&2
+        echo -e "\033[1;33m[*] Reboot the server (a pending kernel/systemd upgrade is the usual cause), then re-run this script.\033[0m" >&2
+
+        exit 1
+
+    fi
+
+}
+
+# ------------------------------------------------------------------------------
 # Root check
 # ------------------------------------------------------------------------------
 
@@ -71,6 +103,8 @@ if [[ $EUID -ne 0 ]]; then
     echo "[!] This script must be run as root."
     exit 1
 fi
+
+check_system_bus "startup"
 
 # ------------------------------------------------------------------------------
 # Terminal colors
@@ -447,6 +481,9 @@ apt-get install -y \
     iproute2 \
     systemd-timesyncd
 
+# The upgrade may have re-executed systemd or deferred a dbus restart.
+check_system_bus "after package upgrade"
+
 # Enable network time synchronization
 timedatectl set-ntp true
 
@@ -610,6 +647,9 @@ chown -R "${NEW_USER}:${NEW_USER}" "$USER_SSH_DIR"
 
 echo -e "\n${BLUE}[4/9] Preparing SSH hardening on port ${SSH_PORT}...${NC}"
 
+# Last health check before the point of no easy return.
+check_system_bus "before SSH changes"
+
 SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
 SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/00-hardening.conf"
 
@@ -699,6 +739,14 @@ if [[ -n "$CONFLICTING_PORTS" ]]; then
     echo -e "${YELLOW}[*] Other sshd drop-ins also define Port (ours is parsed first):${NC}"
     printf '    %s\n' $CONFLICTING_PORTS
 
+fi
+
+# sshd -t / -T refuse to run without the privilege separation directory.
+# /run is a tmpfs and, with socket activation, /run/sshd is only created when
+# ssh.service starts - so on a freshly booted box it may not exist yet.
+if [[ ! -d /run/sshd ]]; then
+    mkdir -p /run/sshd
+    chmod 0755 /run/sshd
 fi
 
 # Validate sshd configuration BEFORE firewall/socket changes
