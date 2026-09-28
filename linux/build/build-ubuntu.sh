@@ -202,15 +202,30 @@ fi
 NEW_HOSTNAME_SHORT="${NEW_HOSTNAME%%.*}"
 
 # ------------------------------------------------------------------------------
-# 1.3 Non-root Admin Username
+# 1.3 Non-root Admin Username (optional)
+#
+# Leaving this blank skips user creation entirely. In that case the script also
+# leaves PermitRootLogin untouched, so whatever the server already has (e.g.
+# Ubuntu's default "prohibit-password") stays in effect.
 # ------------------------------------------------------------------------------
 
 echo ""
+echo "Leave the username blank to skip creating a new admin user."
+echo "(If skipped, the existing PermitRootLogin setting is left unchanged.)"
+echo ""
+
+CREATE_USER="N"
 
 while true; do
-    read -rp "Enter new administrative username (e.g. deployer): " NEW_USER
+    read -rp "Enter new administrative username (e.g. deployer) [blank = skip]: " NEW_USER
 
-    if [[ -n "$NEW_USER" && ! "$NEW_USER" =~ [^a-z0-9_-] ]]; then
+    if [[ -z "$NEW_USER" ]]; then
+        CREATE_USER="N"
+        break
+    fi
+
+    if [[ ! "$NEW_USER" =~ [^a-z0-9_-] ]]; then
+        CREATE_USER="Y"
         break
     fi
 
@@ -221,15 +236,57 @@ done
 # 1.4 SSH Public Key Input
 # ------------------------------------------------------------------------------
 
-echo ""
-echo -e "${YELLOW}Paste your public SSH key (e.g. ssh-ed25519 AAAA...):${NC}"
+USER_SSH_KEY=""
+DISABLE_PASSWORD_AUTH="Y"
 
-read -rp "SSH Key: " USER_SSH_KEY
+if [[ "$CREATE_USER" == "Y" ]]; then
 
-while [[ -z "$USER_SSH_KEY" ]]; do
-    echo -e "${RED}[!] An SSH key is required because password authentication will be disabled.${NC}"
+    echo ""
+    echo -e "${YELLOW}Paste your public SSH key (e.g. ssh-ed25519 AAAA...):${NC}"
+
     read -rp "SSH Key: " USER_SSH_KEY
-done
+
+    while [[ -z "$USER_SSH_KEY" ]]; do
+        echo -e "${RED}[!] An SSH key is required because password authentication will be disabled.${NC}"
+        read -rp "SSH Key: " USER_SSH_KEY
+    done
+
+else
+
+    echo ""
+    echo -e "${YELLOW}[*] Skipping new user creation.${NC}"
+
+    # Lockout guard: password authentication is about to be disabled, so make
+    # sure SOME account already has an authorized key before doing that.
+    EXISTING_KEYS="N"
+
+    for KEYFILE in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
+        if [[ -s "$KEYFILE" ]]; then
+            EXISTING_KEYS="Y"
+            break
+        fi
+    done
+
+    if [[ "$EXISTING_KEYS" == "Y" ]]; then
+
+        echo -e "${GREEN}[*] Existing authorized_keys found. Password authentication will be disabled.${NC}"
+
+    else
+
+        echo -e "${RED}[!] No existing authorized_keys found for root or any /home user.${NC}"
+        echo -e "${RED}[!] Disabling password authentication now could lock you out.${NC}"
+
+        read -rp "Disable SSH password authentication anyway? [y/N]: " FORCE_DISABLE_PW
+        FORCE_DISABLE_PW=${FORCE_DISABLE_PW:-N}
+
+        if [[ ! "$FORCE_DISABLE_PW" =~ ^[Yy]$ ]]; then
+            DISABLE_PASSWORD_AUTH="N"
+            echo -e "${YELLOW}[*] Password authentication settings will be left unchanged.${NC}"
+        fi
+
+    fi
+
+fi
 
 # ------------------------------------------------------------------------------
 # 1.5 SSH Port Setup
@@ -422,7 +479,20 @@ else
     echo "  Hostname:         ${CURRENT_HOSTNAME} (unchanged)"
 fi
 
-echo "  Admin user:       ${NEW_USER}"
+if [[ "$CREATE_USER" == "Y" ]]; then
+    echo "  Admin user:       ${NEW_USER}"
+    echo "  Root login:       Will be disabled"
+else
+    echo "  Admin user:       (none - skipped)"
+    echo "  Root login:       Left unchanged"
+fi
+
+if [[ "$DISABLE_PASSWORD_AUTH" == "Y" ]]; then
+    echo "  Password auth:    Will be disabled"
+else
+    echo "  Password auth:    Left unchanged"
+fi
+
 echo "  SSH port:         ${SSH_PORT}"
 
 if [[ "$ENABLE_WHITELIST" =~ ^[Yy]$ ]]; then
@@ -599,47 +669,55 @@ fi
 # 5. User Provisioning & Passwordless Sudo
 # ==============================================================================
 
-echo -e "\n${BLUE}[3/9] Provisioning user '${NEW_USER}' with passwordless sudo...${NC}"
+if [[ "$CREATE_USER" == "Y" ]]; then
 
-if id "$NEW_USER" &>/dev/null; then
+    echo -e "\n${BLUE}[3/9] Provisioning user '${NEW_USER}' with passwordless sudo...${NC}"
 
-    echo -e "${YELLOW}[*] User ${NEW_USER} already exists. Ensuring sudo and SSH access...${NC}"
+    if id "$NEW_USER" &>/dev/null; then
+
+        echo -e "${YELLOW}[*] User ${NEW_USER} already exists. Ensuring sudo and SSH access...${NC}"
+
+    else
+
+        adduser --disabled-password --gecos "" "$NEW_USER"
+
+    fi
+
+    usermod -aG sudo "$NEW_USER"
+
+    # Configure passwordless sudo
+    echo "${NEW_USER} ALL=(ALL) NOPASSWD:ALL" \
+        > "/etc/sudoers.d/90-${NEW_USER}-init"
+
+    chmod 0440 "/etc/sudoers.d/90-${NEW_USER}-init"
+
+    # Validate sudoers entry
+    if ! visudo -cf "/etc/sudoers.d/90-${NEW_USER}-init" >/dev/null; then
+
+        echo -e "${RED}[!] Generated sudoers configuration is invalid.${NC}"
+        rm -f "/etc/sudoers.d/90-${NEW_USER}-init"
+        exit 1
+
+    fi
+
+    # Deploy authorized SSH key
+    USER_SSH_DIR="/home/${NEW_USER}/.ssh"
+
+    mkdir -p "$USER_SSH_DIR"
+
+    printf '%s\n' "$USER_SSH_KEY" \
+        > "${USER_SSH_DIR}/authorized_keys"
+
+    chmod 700 "$USER_SSH_DIR"
+    chmod 600 "${USER_SSH_DIR}/authorized_keys"
+
+    chown -R "${NEW_USER}:${NEW_USER}" "$USER_SSH_DIR"
 
 else
 
-    adduser --disabled-password --gecos "" "$NEW_USER"
+    echo -e "\n${BLUE}[3/9] No admin username given. Skipping user provisioning.${NC}"
 
 fi
-
-usermod -aG sudo "$NEW_USER"
-
-# Configure passwordless sudo
-echo "${NEW_USER} ALL=(ALL) NOPASSWD:ALL" \
-    > "/etc/sudoers.d/90-${NEW_USER}-init"
-
-chmod 0440 "/etc/sudoers.d/90-${NEW_USER}-init"
-
-# Validate sudoers entry
-if ! visudo -cf "/etc/sudoers.d/90-${NEW_USER}-init" >/dev/null; then
-
-    echo -e "${RED}[!] Generated sudoers configuration is invalid.${NC}"
-    rm -f "/etc/sudoers.d/90-${NEW_USER}-init"
-    exit 1
-
-fi
-
-# Deploy authorized SSH key
-USER_SSH_DIR="/home/${NEW_USER}/.ssh"
-
-mkdir -p "$USER_SSH_DIR"
-
-printf '%s\n' "$USER_SSH_KEY" \
-    > "${USER_SSH_DIR}/authorized_keys"
-
-chmod 700 "$USER_SSH_DIR"
-chmod 600 "${USER_SSH_DIR}/authorized_keys"
-
-chown -R "${NEW_USER}:${NEW_USER}" "$USER_SSH_DIR"
 
 # ==============================================================================
 # 6. Prepare SSH Hardening Configuration
@@ -716,17 +794,30 @@ rm -f "${SSHD_DROPIN_DIR}/99-hardening.conf"
 # From here until the new port is verified, any unexpected failure rolls back.
 SSH_CHANGES_IN_FLIGHT="Y"
 
-cat <<EOF > "$SSHD_DROPIN_FILE"
-Port ${SSH_PORT}
-PermitRootLogin no
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PubkeyAuthentication yes
-X11Forwarding no
-MaxAuthTries 3
-ClientAliveInterval 300
-ClientAliveCountMax 2
-EOF
+# ------------------------------------------------------------------------------
+# PermitRootLogin is only written when a new admin user was created. Without
+# one, the keyword is omitted entirely so the server's existing setting (from
+# sshd_config or another drop-in) keeps applying.
+# ------------------------------------------------------------------------------
+
+{
+    echo "Port ${SSH_PORT}"
+
+    if [[ "$CREATE_USER" == "Y" ]]; then
+        echo "PermitRootLogin no"
+    fi
+
+    if [[ "$DISABLE_PASSWORD_AUTH" == "Y" ]]; then
+        echo "PasswordAuthentication no"
+        echo "KbdInteractiveAuthentication no"
+    fi
+
+    echo "PubkeyAuthentication yes"
+    echo "X11Forwarding no"
+    echo "MaxAuthTries 3"
+    echo "ClientAliveInterval 300"
+    echo "ClientAliveCountMax 2"
+} > "$SSHD_DROPIN_FILE"
 
 # Warn if another drop-in still sets a conflicting Port.
 CONFLICTING_PORTS=$(
@@ -771,6 +862,7 @@ echo -e "${GREEN}[*] OpenSSH configuration syntax is valid.${NC}"
 # whole script silently.
 SSHD_EFFECTIVE_CONFIG=$(sshd -T 2>/dev/null) || SSHD_EFFECTIVE_CONFIG=""
 EFFECTIVE_PORT=$(awk '/^port / && !found { print $2; found = 1 }' <<< "$SSHD_EFFECTIVE_CONFIG")
+EFFECTIVE_ROOT_LOGIN=$(awk '/^permitrootlogin / && !found { print $2; found = 1 }' <<< "$SSHD_EFFECTIVE_CONFIG")
 
 if [[ -n "$EFFECTIVE_PORT" && "$EFFECTIVE_PORT" != "$SSH_PORT" ]]; then
 
@@ -782,6 +874,10 @@ if [[ -n "$EFFECTIVE_PORT" && "$EFFECTIVE_PORT" != "$SSH_PORT" ]]; then
 
     exit 1
 
+fi
+
+if [[ "$CREATE_USER" != "Y" ]]; then
+    echo -e "${YELLOW}[*] PermitRootLogin left unchanged (effective value: ${EFFECTIVE_ROOT_LOGIN:-unknown}).${NC}"
 fi
 
 # ------------------------------------------------------------------------------
@@ -1208,7 +1304,11 @@ if [[ "$INSTALL_DOCKER" =~ ^[Yy]$ ]]; then
 
     curl -fsSL https://get.docker.com | sh
 
-    usermod -aG docker "$NEW_USER"
+    if [[ "$CREATE_USER" == "Y" ]]; then
+        usermod -aG docker "$NEW_USER"
+    else
+        echo -e "${YELLOW}[*] No new admin user; add users to the 'docker' group manually if needed.${NC}"
+    fi
 
     systemctl enable docker
     systemctl start docker
@@ -1228,6 +1328,12 @@ SERVER_IP=$(
     || hostname -I | awk '{print $1}'
 )
 
+if [[ "$CREATE_USER" == "Y" ]]; then
+    SSH_LOGIN_USER="$NEW_USER"
+else
+    SSH_LOGIN_USER="<your-user>"
+fi
+
 echo ""
 echo -e "${GREEN}================================================================${NC}"
 echo -e "${GREEN}             Server Setup & Hardening Complete!                 ${NC}"
@@ -1237,7 +1343,13 @@ echo ""
 echo -e "Connection & Access Details:"
 echo ""
 echo -e "  Hostname:        ${GREEN}$(hostname)${NC}"
-echo -e "  Admin User:      ${GREEN}${NEW_USER}${NC}"
+
+if [[ "$CREATE_USER" == "Y" ]]; then
+    echo -e "  Admin User:      ${GREEN}${NEW_USER}${NC}"
+else
+    echo -e "  Admin User:      ${YELLOW}None created (skipped)${NC}"
+fi
+
 echo -e "  SSH Port:        ${GREEN}${SSH_PORT}${NC}"
 
 if [[ "$SSH_SOCKET_MODE" == "Y" ]]; then
@@ -1246,8 +1358,17 @@ else
     echo -e "  SSH Activation:  ${CYAN}ssh.service (traditional)${NC}"
 fi
 
-echo -e "  Root Login:      ${RED}Disabled${NC}"
-echo -e "  Password Auth:   ${RED}Disabled (SSH Key Only)${NC}"
+if [[ "$CREATE_USER" == "Y" ]]; then
+    echo -e "  Root Login:      ${RED}Disabled${NC}"
+else
+    echo -e "  Root Login:      ${YELLOW}Unchanged (${EFFECTIVE_ROOT_LOGIN:-unknown})${NC}"
+fi
+
+if [[ "$DISABLE_PASSWORD_AUTH" == "Y" ]]; then
+    echo -e "  Password Auth:   ${RED}Disabled (SSH Key Only)${NC}"
+else
+    echo -e "  Password Auth:   ${YELLOW}Unchanged${NC}"
+fi
 
 if [[ "$ENABLE_WHITELIST" =~ ^[Yy]$ ]]; then
 
@@ -1280,7 +1401,7 @@ echo ""
 echo -e "${YELLOW}CRITICAL:${NC}"
 echo -e "${YELLOW}Open a NEW terminal and verify SSH access before closing your current session.${NC}"
 echo ""
-echo -e "  ${BLUE}ssh -p ${SSH_PORT} ${NEW_USER}@${SERVER_IP}${NC}"
+echo -e "  ${BLUE}ssh -p ${SSH_PORT} ${SSH_LOGIN_USER}@${SERVER_IP}${NC}"
 echo ""
 
 if [[ "$ENABLE_WHITELIST" =~ ^[Yy]$ ]]; then
